@@ -13,6 +13,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 {
     private readonly POParser _parser = new(new POParserSettings());
     private readonly POGenerator _poGenerator = new();
+    private readonly TokenCounter _tokenCounter = new();
 
     protected override async Task<int> ExecuteAsync(
         CommandContext context,
@@ -21,8 +22,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
     {
         var config = await LoadConfigAsync(settings.ConfigPath);
 
-        if (settings.DryRun)
-            AnsiConsole.Console.MarkupLine("[yellow]⚠ DRY RUN MODE - Simulated translations only[/]\n");
+        RenderHeader(settings.DryRun);
 
         var potFiles = DiscoverPotFiles(config, settings);
         if (potFiles.Length == 0)
@@ -47,7 +47,26 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
                 ct);
 
         AnsiConsole.Console.MarkupLine("\n[green]✓ All translations completed[/]");
+
+        _tokenCounter.RenderSummary(AnsiConsole.Console, config.Llm.Model);
+
         return 0;
+    }
+
+    private void RenderHeader(bool dryRun)
+    {
+        var panel = new Panel(
+            dryRun
+                ? "[yellow]⚠ DRY RUN MODE[/]\nSimulated translations only\nToken usage will be estimated"
+                : "[green]🚀 LIVE MODE[/]\nReal API calls will be made\nTokens will be charged"
+        )
+        {
+            Border = BoxBorder.Rounded,
+            BorderStyle = new Style(dryRun ? Color.Yellow : Color.Green)
+        };
+
+        AnsiConsole.Console.Write(panel);
+        AnsiConsole.Console.WriteLine();
     }
 
     private async Task<Config> LoadConfigAsync(string path)
@@ -184,14 +203,14 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 
     private ITranslator CreateTranslator(bool dryRun, LlmConfig llm)
     {
-        if (dryRun) return new DryRunTranslator();
+        if (dryRun) return new DryRunTranslator(_tokenCounter, AnsiConsole.Console, llm.Model);
 
         var client = new ChatClient(
             llm.Model,
             new ApiKeyCredential(llm.ApiKey),
             new OpenAIClientOptions { Endpoint = new Uri(llm.ApiBase) });
 
-        return new AiTranslator(client);
+        return new AiTranslator(client, _tokenCounter, AnsiConsole.Console);
     }
 
     public class Settings : CommandSettings
