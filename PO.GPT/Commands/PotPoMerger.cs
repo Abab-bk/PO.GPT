@@ -3,7 +3,7 @@ using Spectre.Console;
 
 namespace PO.GPT.Commands;
 
-public class PotPoMerger(IAnsiConsole console) : IPotPoMerger
+public class PotPoMerger(IAnsiConsole console)
 {
     public MergeResult Merge(POCatalog pot, POCatalog existingPo, bool skipTranslated)
     {

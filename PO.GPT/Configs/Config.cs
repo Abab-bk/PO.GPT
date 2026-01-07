@@ -11,7 +11,6 @@ public partial record Config(
 
 [YamlObject]
 public partial record TranslateConfig(
-    string[] SourceLanguages,
     string[] TargetLanguages,
     string InputPattern,
     string OutputPattern,
@@ -30,5 +29,6 @@ public partial record ProjectConfig(
 public partial record LlmConfig(
     string Model,
     string ApiKey,
-    string ApiBase
+    string ApiBase,
+    string Prompt
 );

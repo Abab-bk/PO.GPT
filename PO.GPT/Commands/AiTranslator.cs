@@ -9,8 +9,11 @@ public class AiTranslator(ChatClient client, TokenCounter tokenCounter, IAnsiCon
     public async Task<IReadOnlyList<TranslationResult>> TranslateAsync(
         IReadOnlyList<TranslationUnit> batch,
         string targetLanguage,
+        string userPrompt,
         CancellationToken ct)
     {
+        console.MarkupLine($"Your prompt: {userPrompt}");
+
         await console.Status()
             .Spinner(Spinner.Known.Dots)
             .SpinnerStyle(Style.Parse("blue"))
@@ -22,6 +25,7 @@ public class AiTranslator(ChatClient client, TokenCounter tokenCounter, IAnsiCon
         {
             new SystemChatMessage(
                 "You are a professional translator. Translate the given text to the target language accurately."),
+            new UserChatMessage(userPrompt),
             new UserChatMessage(prompt)
         };
 

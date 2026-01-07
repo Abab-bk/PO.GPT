@@ -3,7 +3,7 @@ using Spectre.Console;
 
 namespace PO.GPT.Commands;
 
-public class CatalogApplier(IAnsiConsole console) : ICatalogApplier
+public class CatalogApplier(IAnsiConsole console)
 {
     public POCatalog Apply(
         POCatalog catalog,
@@ -40,7 +40,7 @@ public class CatalogApplier(IAnsiConsole console) : ICatalogApplier
         catalog.Language = language;
         catalog.Encoding = "UTF-8";
 
-        if (catalog.Headers == null) catalog.Headers = new Dictionary<string, string>();
+        catalog.Headers ??= new Dictionary<string, string>();
 
         catalog.Headers["Last-Modified"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         catalog.Headers["PO-GPT-Version"] = "1.0.0";

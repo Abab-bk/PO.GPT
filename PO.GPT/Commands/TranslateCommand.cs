@@ -11,7 +11,10 @@ namespace PO.GPT.Commands;
 
 public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 {
+    private readonly CatalogApplier _applier = new(AnsiConsole.Console);
+    private readonly PotPoMerger _merger = new(AnsiConsole.Console);
     private readonly POParser _parser = new(new POParserSettings());
+    private readonly TranslationPlanner _planner = new();
     private readonly POGenerator _poGenerator = new();
     private readonly TokenCounter _tokenCounter = new();
 
@@ -32,18 +35,13 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         }
 
         var translator = CreateTranslator(settings.DryRun, config.Llm);
-        var planner = new TranslationPlanner();
-        var merger = new PotPoMerger(AnsiConsole.Console);
-        var applier = new CatalogApplier(AnsiConsole.Console);
 
         foreach (var potFile in potFiles)
             await ProcessPotFileAsync(
                 potFile,
                 config,
                 translator,
-                planner,
-                merger,
-                applier,
+                settings,
                 ct);
 
         AnsiConsole.Console.MarkupLine("\n[green]✓ All translations completed[/]");
@@ -57,8 +55,8 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
     {
         var panel = new Panel(
             dryRun
-                ? "[yellow]⚠ DRY RUN MODE[/]\nSimulated translations only\nToken usage will be estimated"
-                : "[green]🚀 LIVE MODE[/]\nReal API calls will be made\nTokens will be charged"
+                ? "[yellow]⚠ DRY RUN MODE[/]\nSimulated translations only\nToken usage will be estimated\n[bold]NO files will be modified[/]"
+                : "[green]🚀 LIVE MODE[/]\nReal API calls will be made\nTokens will be charged\nFiles will be updated"
         )
         {
             Border = BoxBorder.Rounded,
@@ -96,9 +94,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         string potPath,
         Config config,
         ITranslator translator,
-        ITranslationPlanner planner,
-        IPotPoMerger merger,
-        ICatalogApplier applier,
+        Settings settings,
         CancellationToken ct)
     {
         var fileName = Path.GetFileNameWithoutExtension(potPath);
@@ -113,9 +109,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
                 targetLang,
                 config,
                 translator,
-                planner,
-                merger,
-                applier,
+                settings,
                 ct);
     }
 
@@ -125,9 +119,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         string lang,
         Config config,
         ITranslator translator,
-        ITranslationPlanner planner,
-        IPotPoMerger merger,
-        ICatalogApplier applier,
+        Settings settings,
         CancellationToken ct)
     {
         AnsiConsole.Console.MarkupLine($"\n[bold]→ Target language: {lang}[/]");
@@ -135,7 +127,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         var outputPath = BuildOutputPath(potPath, lang, config);
         var existingPo = await LoadOrCreatePoAsync(outputPath);
 
-        var mergeResult = merger.Merge(
+        var mergeResult = _merger.Merge(
             potCatalog,
             existingPo,
             config.Translate.SkipTranslated);
@@ -146,7 +138,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
             return;
         }
 
-        var batches = planner.Plan(mergeResult.Missing, config.Translate.BatchSize);
+        var batches = _planner.Plan(mergeResult.Missing, config.Translate.BatchSize);
         var updatedCatalog = mergeResult.BaseCatalog;
 
         AnsiConsole.Console.MarkupLine($"[grey]Processing {batches.Count} batch(es)...[/]");
@@ -158,13 +150,35 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
             var results = await translator.TranslateAsync(
                 batches[i].Units,
                 lang,
-                ct);
+                config.Llm.Prompt,
+                ct
+            );
 
-            updatedCatalog = applier.Apply(updatedCatalog, results, lang);
+            updatedCatalog = _applier.Apply(updatedCatalog, results, lang);
+
+            // 在 dry run 模式下显示模拟翻译的内容
+            if (settings.DryRun)
+            {
+                AnsiConsole.Console.MarkupLine("\n[yellow]📋 Simulated translations:[/]");
+                foreach (var result in results)
+                {
+                    AnsiConsole.Console.MarkupLine($"  [green]→[/] {result.OriginalUnit.MsgId.EscapeMarkup()}");
+                    AnsiConsole.Console.MarkupLine($"  [blue]←[/] {result.Translated.EscapeMarkup()}");
+                    AnsiConsole.Console.WriteLine();
+                }
+            }
         }
 
-        await SaveCatalogAsync(outputPath, updatedCatalog);
-        AnsiConsole.Console.MarkupLine($"[green]✓ Saved to: {Path.GetFileName(outputPath)}[/]");
+        if (settings.DryRun)
+        {
+            AnsiConsole.Console.MarkupLine("[yellow]⚠ DRY RUN: File will not be saved[/]");
+            AnsiConsole.Console.MarkupLine($"[yellow]📄 Would have saved to: {Path.GetFileName(outputPath)}[/]");
+        }
+        else
+        {
+            await SaveCatalogAsync(outputPath, updatedCatalog);
+            AnsiConsole.Console.MarkupLine($"[green]✓ Saved to: {Path.GetFileName(outputPath)}[/]");
+        }
     }
 
     private async Task<POCatalog> ParseCatalogAsync(string path)
@@ -172,9 +186,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         await using var stream = File.OpenRead(path);
         var result = _parser.Parse(stream);
 
-        if (!result.Success) throw new InvalidDataException($"Failed to parse: {path}");
-
-        return result.Catalog;
+        return !result.Success ? throw new InvalidDataException($"Failed to parse: {path}") : result.Catalog;
     }
 
     private async Task<POCatalog> LoadOrCreatePoAsync(string path)
@@ -203,7 +215,7 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 
     private ITranslator CreateTranslator(bool dryRun, LlmConfig llm)
     {
-        if (dryRun) return new DryRunTranslator(_tokenCounter, AnsiConsole.Console, llm.Model);
+        if (dryRun) return new DryRunTranslator(_tokenCounter, AnsiConsole.Console);
 
         var client = new ChatClient(
             llm.Model,

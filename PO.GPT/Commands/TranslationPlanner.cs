@@ -1,6 +1,6 @@
 ﻿namespace PO.GPT.Commands;
 
-public class TranslationPlanner : ITranslationPlanner
+public class TranslationPlanner
 {
     public IReadOnlyList<TranslationBatch> Plan(
         IReadOnlyList<TranslationUnit> units,
