@@ -1,43 +1,50 @@
 ﻿using Karambolo.PO;
+using Spectre.Console;
 
 namespace PO.GPT.Commands;
 
-public class CatalogApplier : ICatalogApplier
+public class CatalogApplier(IAnsiConsole console) : ICatalogApplier
 {
     public POCatalog Apply(
         POCatalog catalog,
         IReadOnlyList<TranslationResult> results,
-        string language
-    )
+        string language)
     {
-        if (results.Count == 0) return catalog;
-
-        var unitDictionary = catalog.Values.ToDictionary(
-            u => u.Key.Id,
-            u => u
-        );
+        if (results.Count == 0)
+        {
+            console.MarkupLine("[grey]No translations to apply[/]");
+            return catalog;
+        }
 
         foreach (var result in results)
-            unitDictionary[result.OriginalUnit.MsgId] = new POPluralEntry(new POKey(
-                result.TranslatedUnit.MsgId,
-                result.TranslatedUnit.PluralId,
-                result.TranslatedUnit.Context
-            ));
-
-        var final = new POCatalog
         {
-            HeaderComments = catalog.HeaderComments,
-            Encoding = "UTF-8",
-            Language = language,
-            Headers = new Dictionary<string, string>
+            var key = new POKey(
+                result.OriginalUnit.MsgId,
+                result.OriginalUnit.PluralId,
+                result.OriginalUnit.Context
+            );
+
+            var existingEntry = catalog.Values.FirstOrDefault(e => e.Key.Equals(key));
+
+            if (existingEntry != null) catalog.Remove(existingEntry);
+
+            var newEntry = new POSingularEntry(key)
             {
-                { "CREATION", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") },
-                { "PO.GPT", "1.0.0" }
-            }
-        };
+                Translation = result.Translated
+            };
 
-        foreach (var unit in unitDictionary) final.Add(unit.Value);
+            catalog.Add(newEntry);
+            console.MarkupLine($"[green]✓[/] {result.OriginalUnit.MsgId.EscapeMarkup()}");
+        }
 
-        return final;
+        catalog.Language = language;
+        catalog.Encoding = "UTF-8";
+
+        if (catalog.Headers == null) catalog.Headers = new Dictionary<string, string>();
+
+        catalog.Headers["Last-Modified"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+        catalog.Headers["PO-GPT-Version"] = "1.0.0";
+
+        return catalog;
     }
 }

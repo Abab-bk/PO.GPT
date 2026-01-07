@@ -4,7 +4,7 @@ namespace PO.GPT.Commands;
 
 public interface IPotPoMerger
 {
-    MergeResult Merge(POCatalog pot, POCatalog existingPo);
+    MergeResult Merge(POCatalog pot, POCatalog existingPo, bool skipTranslated);
 }
 
 public record MergeResult(

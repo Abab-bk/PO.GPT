@@ -2,5 +2,5 @@
 
 public record TranslationResult(
     TranslationUnit OriginalUnit,
-    TranslationUnit TranslatedUnit
+    string Translated
 );

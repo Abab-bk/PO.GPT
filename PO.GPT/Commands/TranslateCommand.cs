@@ -11,107 +11,187 @@ namespace PO.GPT.Commands;
 
 public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 {
-    protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken ct)
+    private readonly POParser _parser = new(new POParserSettings());
+    private readonly POGenerator _poGenerator = new();
+
+    protected override async Task<int> ExecuteAsync(
+        CommandContext context,
+        Settings settings,
+        CancellationToken ct)
     {
         var config = await LoadConfigAsync(settings.ConfigPath);
+
         if (settings.DryRun)
-            AnsiConsole.Console.MarkupLine("[yellow]🔍 DRY RUN MODE - No API calls will be modified[/]\n");
+            AnsiConsole.Console.MarkupLine("[yellow]⚠ DRY RUN MODE - Simulated translations only[/]\n");
 
-        var potFiles = GetPotFiles(config, settings);
-        if (potFiles.Length == 0) return 1;
+        var potFiles = DiscoverPotFiles(config, settings);
+        if (potFiles.Length == 0)
+        {
+            AnsiConsole.Console.MarkupLine("[red]No POT files found![/]");
+            return 1;
+        }
 
-        var translator = settings.DryRun ? new DryRunTranslator() : CreateAiTranslator(config.Llm);
-        var parser = new POParser(new POParserSettings());
+        var translator = CreateTranslator(settings.DryRun, config.Llm);
         var planner = new TranslationPlanner();
-        var applier = new CatalogApplier();
+        var merger = new PotPoMerger(AnsiConsole.Console);
+        var applier = new CatalogApplier(AnsiConsole.Console);
 
         foreach (var potFile in potFiles)
-            await ProcessPotFileAsync(planner, applier, parser, potFile, config, translator, ct);
+            await ProcessPotFileAsync(
+                potFile,
+                config,
+                translator,
+                planner,
+                merger,
+                applier,
+                ct);
 
+        AnsiConsole.Console.MarkupLine("\n[green]✓ All translations completed[/]");
         return 0;
     }
 
     private async Task<Config> LoadConfigAsync(string path)
     {
-        if (!File.Exists(path)) throw new FileNotFoundException($"Config file not found: {path}");
+        if (!File.Exists(path)) throw new FileNotFoundException($"Config not found: {path}");
+
         await using var stream = File.OpenRead(path);
-        var config = await YamlSerializer.DeserializeAsync<Config>(stream);
-        return config ?? throw new InvalidDataException("Invalid configuration format.");
+        return await YamlSerializer.DeserializeAsync<Config>(stream)
+               ?? throw new InvalidDataException("Invalid config format");
     }
 
-    private string[] GetPotFiles(Config config, Settings settings)
+    private string[] DiscoverPotFiles(Config config, Settings settings)
     {
-        var basePath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(settings.ConfigPath))!,
+        var basePath = Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(settings.ConfigPath))!,
             config.Project.BasePath);
-        AnsiConsole.Console.MarkupLine($"[grey]Searching in: {basePath}[/]");
-        return Directory.GetFiles(basePath, config.Translate.InputPattern, SearchOption.AllDirectories);
+
+        AnsiConsole.Console.MarkupLine($"[grey]Scanning: {basePath}[/]");
+
+        return Directory.GetFiles(
+            basePath,
+            config.Translate.InputPattern,
+            SearchOption.AllDirectories);
     }
 
     private async Task ProcessPotFileAsync(
+        string potPath,
+        Config config,
+        ITranslator translator,
         ITranslationPlanner planner,
+        IPotPoMerger merger,
         ICatalogApplier applier,
-        POParser parser,
-        string potPath, Config config, ITranslator translator, CancellationToken ct)
+        CancellationToken ct)
     {
-        AnsiConsole.Console.MarkupLine($"[grey]Processing: {Path.GetFileName(potPath)}[/]");
-
         var fileName = Path.GetFileNameWithoutExtension(potPath);
+        AnsiConsole.Console.MarkupLine($"\n[bold cyan]Processing: {fileName}.pot[/]");
 
-        var parseResult = parser.Parse(File.OpenRead(potPath));
-        if (!parseResult.Success) throw new InvalidDataException($"Failed to parse: {fileName}.pot");
+        var potCatalog = await ParseCatalogAsync(potPath);
 
         foreach (var targetLang in config.Translate.TargetLanguages)
-            await TranslateToLanguageAsync(planner, applier, parser, potPath, parseResult.Catalog, targetLang, config,
-                translator, ct);
+            await TranslateLanguageAsync(
+                potPath,
+                potCatalog,
+                targetLang,
+                config,
+                translator,
+                planner,
+                merger,
+                applier,
+                ct);
     }
 
-    private async Task TranslateToLanguageAsync(
-        ITranslationPlanner planner,
-        ICatalogApplier applier,
-        POParser parser,
+    private async Task TranslateLanguageAsync(
         string potPath,
         POCatalog potCatalog,
         string lang,
         Config config,
         ITranslator translator,
-        CancellationToken ct
-    )
+        ITranslationPlanner planner,
+        IPotPoMerger merger,
+        ICatalogApplier applier,
+        CancellationToken ct)
     {
-        var outputPath = GetOutputPath(potPath, lang, config);
-        var poCatalog = File.Exists(outputPath)
-            ? parser.Parse(File.OpenRead(outputPath)).Catalog
-            : new POCatalog();
+        AnsiConsole.Console.MarkupLine($"\n[bold]→ Target language: {lang}[/]");
 
-        var merge = new PotPoMerger().Merge(potCatalog, poCatalog);
-        var batches = planner.Plan(merge.Missing, config.Translate.BatchSize);
+        var outputPath = BuildOutputPath(potPath, lang, config);
+        var existingPo = await LoadOrCreatePoAsync(outputPath);
 
-        var currentCatalog = poCatalog;
+        var mergeResult = merger.Merge(
+            potCatalog,
+            existingPo,
+            config.Translate.SkipTranslated);
 
-        for (var index = 0; index < batches.Count; index++)
+        if (mergeResult.Missing.Count == 0)
         {
-            var batch = batches[index];
-            AnsiConsole.Console.MarkupLine($"[grey]Translating batch {index + 1} of {batches.Count}[/]");
-            var results = await translator.TranslateAsync(batch.Units, lang, ct);
-            currentCatalog = applier.Apply(currentCatalog, results, lang);
-
-            // 这里可以增加一个保存逻辑，防止中途断电丢数据
-            // SaveCatalog(currentCatalog, outputPath);
+            AnsiConsole.Console.MarkupLine("[grey]Nothing to translate[/]");
+            return;
         }
+
+        var batches = planner.Plan(mergeResult.Missing, config.Translate.BatchSize);
+        var updatedCatalog = mergeResult.BaseCatalog;
+
+        AnsiConsole.Console.MarkupLine($"[grey]Processing {batches.Count} batch(es)...[/]");
+
+        for (var i = 0; i < batches.Count; i++)
+        {
+            AnsiConsole.Console.MarkupLine($"\n[bold]Batch {i + 1}/{batches.Count}[/]");
+
+            var results = await translator.TranslateAsync(
+                batches[i].Units,
+                lang,
+                ct);
+
+            updatedCatalog = applier.Apply(updatedCatalog, results, lang);
+        }
+
+        await SaveCatalogAsync(outputPath, updatedCatalog);
+        AnsiConsole.Console.MarkupLine($"[green]✓ Saved to: {Path.GetFileName(outputPath)}[/]");
     }
 
-    private string GetOutputPath(string potPath, string lang, Config config)
+    private async Task<POCatalog> ParseCatalogAsync(string path)
+    {
+        await using var stream = File.OpenRead(path);
+        var result = _parser.Parse(stream);
+
+        if (!result.Success) throw new InvalidDataException($"Failed to parse: {path}");
+
+        return result.Catalog;
+    }
+
+    private async Task<POCatalog> LoadOrCreatePoAsync(string path)
+    {
+        if (!File.Exists(path)) return new POCatalog();
+
+        await using var stream = File.OpenRead(path);
+        return _parser.Parse(stream).Catalog;
+    }
+
+    private async Task SaveCatalogAsync(string path, POCatalog catalog)
+    {
+        await using var stream = File.Open(path, FileMode.Create);
+        _poGenerator.Generate(stream, catalog);
+    }
+
+    private string BuildOutputPath(string potPath, string lang, Config config)
     {
         var fileName = Path.GetFileNameWithoutExtension(potPath);
         var outputFileName = config.Translate.OutputPattern
             .Replace("{file}", fileName)
             .Replace("{lang}", lang);
+
         return Path.Combine(Path.GetDirectoryName(potPath)!, outputFileName);
     }
 
-    private ITranslator CreateAiTranslator(LlmConfig llm)
+    private ITranslator CreateTranslator(bool dryRun, LlmConfig llm)
     {
-        return new AiTranslator(new ChatClient(llm.Model, new ApiKeyCredential(llm.ApiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(llm.ApiBase) }));
+        if (dryRun) return new DryRunTranslator();
+
+        var client = new ChatClient(
+            llm.Model,
+            new ApiKeyCredential(llm.ApiKey),
+            new OpenAIClientOptions { Endpoint = new Uri(llm.ApiBase) });
+
+        return new AiTranslator(client);
     }
 
     public class Settings : CommandSettings
