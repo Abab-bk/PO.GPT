@@ -21,7 +21,7 @@ A powerful CLI tool that leverages AI to automatically translate GNU gettext PO/
 ### As a .NET Tool
 
 ```bash
-dotnet tool install --global PO.GPT
+dotnet tool install --global rorokaii.po.gpt
 ```
 
 ## Quick Start
