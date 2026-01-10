@@ -5,7 +5,7 @@ namespace PO.GPT.Commands;
 public class DryRunTranslator(TokenCounter tokenCounter, IAnsiConsole console)
     : ITranslator
 {
-    public Task<IReadOnlyList<TranslationResult>> TranslateAsync(
+    public Task<IReadOnlyList<TranslationUnit>> TranslateAsync(
         IReadOnlyList<TranslationUnit> batch,
         string targetLanguage,
         string userPrompt,
@@ -14,18 +14,17 @@ public class DryRunTranslator(TokenCounter tokenCounter, IAnsiConsole console)
         var promptTokens = TokenEstimator.EstimateBatchTokens(batch, targetLanguage);
         var completionTokens = batch.Sum(u => TokenEstimator.EstimateTokens(u.MsgId));
 
-        console.MarkupLine($"Your prompt: {userPrompt}");
+        if (!string.IsNullOrEmpty(userPrompt))
+            console.MarkupLine($"Your prompt: {userPrompt}");
 
         tokenCounter.AddUsage(promptTokens, completionTokens);
 
         console.MarkupLine($"[grey]✓ Simulated ({promptTokens + completionTokens} tokens)[/]");
 
         var results = batch
-            .Select(u => new TranslationResult(
-                u,
-                $"[{targetLanguage}] {u.MsgId}"))
+            .Select(u => u.WithTranslation($"[{targetLanguage}] {u.MsgId}"))
             .ToList();
 
-        return Task.FromResult<IReadOnlyList<TranslationResult>>(results);
+        return Task.FromResult<IReadOnlyList<TranslationUnit>>(results);
     }
 }

@@ -7,41 +7,36 @@ public class CatalogApplier(IAnsiConsole console)
 {
     public POCatalog Apply(
         POCatalog catalog,
-        IReadOnlyList<TranslationResult> results,
+        IReadOnlyList<TranslationUnit> translatedUnits,
         string language)
     {
-        if (results.Count == 0)
+        if (translatedUnits.Count == 0)
         {
             console.MarkupLine("[grey]No translations to apply[/]");
             return catalog;
         }
 
-        foreach (var result in results)
+        foreach (var unit in translatedUnits)
         {
-            var key = new POKey(
-                result.OriginalUnit.MsgId,
-                result.OriginalUnit.PluralId,
-                result.OriginalUnit.Context
-            );
-
+            var key = new POKey(unit.MsgId, unit.PluralId, unit.Context);
             var existingEntry = catalog.Values.FirstOrDefault(e => e.Key.Equals(key));
 
-            if (existingEntry != null) catalog.Remove(existingEntry);
+            if (existingEntry != null)
+                catalog.Remove(existingEntry);
 
             var newEntry = new POSingularEntry(key)
             {
-                Translation = result.Translated
+                Translation = unit.ExistingTranslation
             };
 
             catalog.Add(newEntry);
-            console.MarkupLine($"[green]✓[/] {result.OriginalUnit.MsgId.EscapeMarkup()}");
+            console.MarkupLine($"[green]✓[/] {unit.MsgId.EscapeMarkup()}");
         }
 
         catalog.Language = language;
         catalog.Encoding = "UTF-8";
 
         catalog.Headers ??= new Dictionary<string, string>();
-
         catalog.Headers["Last-Modified"] = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
         catalog.Headers["PO-GPT-Version"] = "1.0.0";
 

@@ -45,7 +45,6 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
                 ct);
 
         AnsiConsole.Console.MarkupLine("\n[green]✓ All translations completed[/]");
-
         _tokenCounter.RenderSummary(AnsiConsole.Console, config.Llm.Model);
 
         return 0;
@@ -69,7 +68,8 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 
     private async Task<Config> LoadConfigAsync(string path)
     {
-        if (!File.Exists(path)) throw new FileNotFoundException($"Config not found: {path}");
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"Config not found: {path}");
 
         await using var stream = File.OpenRead(path);
         return await YamlSerializer.DeserializeAsync<Config>(stream)
@@ -127,19 +127,21 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         var outputPath = BuildOutputPath(potPath, lang, config);
         var existingPo = await LoadOrCreatePoAsync(outputPath);
 
-        var mergeResult = _merger.Merge(
+        // 直接返回需要翻译的单元列表
+        var unitsToTranslate = _merger.Merge(
             potCatalog,
             existingPo,
             config.Translate.SkipTranslated);
 
-        if (mergeResult.Missing.Count == 0)
+        if (unitsToTranslate.Count == 0)
         {
             AnsiConsole.Console.MarkupLine("[grey]Nothing to translate[/]");
             return;
         }
 
-        var batches = _planner.Plan(mergeResult.Missing, config.Translate.BatchSize);
-        var updatedCatalog = mergeResult.BaseCatalog;
+        // 分批处理
+        var batches = _planner.Plan(unitsToTranslate, config.Translate.BatchSize);
+        var updatedCatalog = existingPo;
 
         AnsiConsole.Console.MarkupLine($"[grey]Processing {batches.Count} batch(es)...[/]");
 
@@ -147,23 +149,27 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         {
             AnsiConsole.Console.MarkupLine($"\n[bold]Batch {i + 1}/{batches.Count}[/]");
 
-            var results = await translator.TranslateAsync(
-                batches[i].Units,
+            // 翻译返回带翻译结果的单元
+            var translatedUnits = await translator.TranslateAsync(
+                batches[i],
                 lang,
                 config.Llm.Prompt,
                 ct
             );
 
-            updatedCatalog = _applier.Apply(updatedCatalog, results, lang);
+            // 应用翻译
+            updatedCatalog = _applier.Apply(updatedCatalog, translatedUnits, lang);
 
-            // 在 dry run 模式下显示模拟翻译的内容
+            // Dry run 模式显示翻译内容
             if (settings.DryRun)
             {
                 AnsiConsole.Console.MarkupLine("\n[yellow]📋 Simulated translations:[/]");
-                foreach (var result in results)
+                foreach (var unit in translatedUnits)
                 {
-                    AnsiConsole.Console.MarkupLine($"  [green]→[/] {result.OriginalUnit.MsgId.EscapeMarkup()}");
-                    AnsiConsole.Console.MarkupLine($"  [blue]←[/] {result.Translated.EscapeMarkup()}");
+                    AnsiConsole.Console.MarkupLine($"  [green]→[/] {unit.MsgId.EscapeMarkup()}");
+                    if (!string.IsNullOrEmpty(unit.Context))
+                        AnsiConsole.Console.MarkupLine($"    [grey](Context: {unit.Context.EscapeMarkup()})[/]");
+                    AnsiConsole.Console.MarkupLine($"  [blue]←[/] {unit.ExistingTranslation.EscapeMarkup()}");
                     AnsiConsole.Console.WriteLine();
                 }
             }
@@ -186,12 +192,15 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         await using var stream = File.OpenRead(path);
         var result = _parser.Parse(stream);
 
-        return !result.Success ? throw new InvalidDataException($"Failed to parse: {path}") : result.Catalog;
+        return !result.Success
+            ? throw new InvalidDataException($"Failed to parse: {path}")
+            : result.Catalog;
     }
 
     private async Task<POCatalog> LoadOrCreatePoAsync(string path)
     {
-        if (!File.Exists(path)) return new POCatalog();
+        if (!File.Exists(path))
+            return new POCatalog();
 
         await using var stream = File.OpenRead(path);
         return _parser.Parse(stream).Catalog;
@@ -199,6 +208,10 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 
     private async Task SaveCatalogAsync(string path, POCatalog catalog)
     {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            Directory.CreateDirectory(directory);
+
         await using var stream = File.Open(path, FileMode.Create);
         _poGenerator.Generate(stream, catalog);
     }
@@ -215,7 +228,8 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
 
     private ITranslator CreateTranslator(bool dryRun, LlmConfig llm)
     {
-        if (dryRun) return new DryRunTranslator(_tokenCounter, AnsiConsole.Console);
+        if (dryRun)
+            return new DryRunTranslator(_tokenCounter, AnsiConsole.Console);
 
         var client = new ChatClient(
             llm.Model,

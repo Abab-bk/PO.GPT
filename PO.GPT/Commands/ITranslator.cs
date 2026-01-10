@@ -2,7 +2,7 @@
 
 public interface ITranslator
 {
-    Task<IReadOnlyList<TranslationResult>> TranslateAsync(
+    Task<IReadOnlyList<TranslationUnit>> TranslateAsync(
         IReadOnlyList<TranslationUnit> batch,
         string targetLanguage,
         string userPrompt,

@@ -5,7 +5,10 @@ namespace PO.GPT.Commands;
 
 public class PotPoMerger(IAnsiConsole console)
 {
-    public MergeResult Merge(POCatalog pot, POCatalog existingPo, bool skipTranslated)
+    public IReadOnlyList<TranslationUnit> Merge(
+        POCatalog pot,
+        POCatalog existingPo,
+        bool skipTranslated)
     {
         var unitsToTranslate = new List<TranslationUnit>();
         var stats = new MergeStats();
@@ -26,9 +29,9 @@ public class PotPoMerger(IAnsiConsole console)
 
             var unit = new TranslationUnit(
                 key.Id,
-                existingTranslation ?? string.Empty,
+                key.ContextId,
                 key.PluralId,
-                key.ContextId
+                existingTranslation ?? string.Empty
             );
 
             unitsToTranslate.Add(unit);
@@ -46,7 +49,7 @@ public class PotPoMerger(IAnsiConsole console)
 
         RenderSummary(stats, unitsToTranslate.Count);
 
-        return new MergeResult(existingPo, unitsToTranslate);
+        return unitsToTranslate;
     }
 
     private void RenderSummary(MergeStats stats, int total)
@@ -60,7 +63,8 @@ public class PotPoMerger(IAnsiConsole console)
         table.AddRow("[yellow]New (needs translation)[/]", stats.New.ToString());
         table.AddRow("[blue]Existing (will re-translate)[/]", stats.Existing.ToString());
 
-        if (stats.Skipped > 0) table.AddRow("[grey]Skipped (already translated)[/]", stats.Skipped.ToString());
+        if (stats.Skipped > 0)
+            table.AddRow("[grey]Skipped (already translated)[/]", stats.Skipped.ToString());
 
         table.AddRow("[bold white]Total to process[/]", total.ToString());
 
