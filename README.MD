@@ -66,10 +66,10 @@ your-project/
 
 ```bash
 # Live translation
-po-gpt config.yaml
+po-gpt translate config.yaml
 
 # Dry run (no API calls, no file modifications)
-po-gpt config.yaml --dry-run
+po-gpt translate config.yaml --dry-run
 ```
 
 ## Configuration Reference
@@ -114,28 +114,6 @@ llm:
 - OpenAI: `gpt-4o`, `gpt-4-turbo`, `gpt-3.5-turbo`
 - Claude: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`
 - Local models: Any OpenAI-compatible endpoint
-
-## Usage Examples
-
-### Basic Translation
-
-```bash
-po-gpt config.yaml
-```
-
-### Dry Run (Testing)
-
-```bash
-po-gpt config.yaml --dry-run
-```
-
-This will:
-- ✅ Parse all files
-- ✅ Show what would be translated
-- ✅ Estimate token costs
-- ❌ Not call the API
-- ❌ Not modify any files
-
 
 ## PO File Context Support
 

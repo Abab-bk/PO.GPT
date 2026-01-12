@@ -34,15 +34,16 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
             return 1;
         }
 
-        var translator = CreateTranslator(settings.DryRun, config.Llm);
-
         foreach (var potFile in potFiles)
+        {
+            var translator = CreateTranslator(settings.DryRun, config.Llm);
             await ProcessPotFileAsync(
                 potFile,
                 config,
                 translator,
                 settings,
                 ct);
+        }
 
         AnsiConsole.Console.MarkupLine("\n[green]✓ All translations completed[/]");
         _tokenCounter.RenderSummary(AnsiConsole.Console, config.Llm.Model);
