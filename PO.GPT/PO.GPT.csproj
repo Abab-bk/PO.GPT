@@ -10,7 +10,7 @@
         <ToolCommandName>po-gpt</ToolCommandName>
         <PackageId>rorokaii.po.gpt</PackageId>
 
-        <Version>1.1.0</Version>
+        <Version>1.1.1</Version>
         <Authors>rorokaii</Authors>
         <Description>AI-powered CLI tool to translate Gettext PO/POT files.</Description>
         <PackageTags>i18n;translation;gettext;po;gpt;openai</PackageTags>

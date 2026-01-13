@@ -34,16 +34,16 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
             return 1;
         }
 
+        var translator = CreateTranslator(settings.DryRun, config.Llm);
+
         foreach (var potFile in potFiles)
-        {
-            var translator = CreateTranslator(settings.DryRun, config.Llm);
             await ProcessPotFileAsync(
                 potFile,
                 config,
                 translator,
                 settings,
-                ct);
-        }
+                ct
+            );
 
         AnsiConsole.Console.MarkupLine("\n[green]✓ All translations completed[/]");
         _tokenCounter.RenderSummary(AnsiConsole.Console, config.Llm.Model);
@@ -128,7 +128,6 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         var outputPath = BuildOutputPath(potPath, lang, config);
         var existingPo = await LoadOrCreatePoAsync(outputPath);
 
-        // 直接返回需要翻译的单元列表
         var unitsToTranslate = _merger.Merge(
             potCatalog,
             existingPo,
@@ -140,7 +139,6 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
             return;
         }
 
-        // 分批处理
         var batches = _planner.Plan(unitsToTranslate, config.Translate.BatchSize);
         var updatedCatalog = existingPo;
 
@@ -150,7 +148,6 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
         {
             AnsiConsole.Console.MarkupLine($"\n[bold]Batch {i + 1}/{batches.Count}[/]");
 
-            // 翻译返回带翻译结果的单元
             var translatedUnits = await translator.TranslateAsync(
                 batches[i],
                 lang,
@@ -158,10 +155,8 @@ public class TranslateCommand : AsyncCommand<TranslateCommand.Settings>
                 ct
             );
 
-            // 应用翻译
             updatedCatalog = _applier.Apply(updatedCatalog, translatedUnits, lang);
 
-            // Dry run 模式显示翻译内容
             if (settings.DryRun)
             {
                 AnsiConsole.Console.MarkupLine("\n[yellow]📋 Simulated translations:[/]");
