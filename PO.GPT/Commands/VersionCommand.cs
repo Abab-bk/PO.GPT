@@ -6,7 +6,7 @@ public class VersionCommand : Command
 {
     protected override int Execute(CommandContext context, CancellationToken cancellationToken)
     {
-        Console.WriteLine("1.1.0");
+        Console.WriteLine("1.1.2");
         return 0;
     }
 }
